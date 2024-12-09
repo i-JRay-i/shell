@@ -248,6 +248,19 @@ int main() {
         break;
       case usrcmd:
         strcpy(env_path, getenv("PATH"));
+        if (args[0][0] == '.' && args[0][1] == '/') {
+          if ((access(args[0], F_OK)) == 0) {
+            pid_t pid = fork();
+            if (pid == 0) {
+              int ret = execvp(args[0], args);
+              exit(ret);
+            }
+            int status = 0;
+            while ((pid = wait(&status)) > 0);
+            break;
+          }
+        }
+
         if ((parse_path(env_path, args[0], cmd_path)) != -1) {
           pid_t pid = fork();
           if (pid == 0) {
