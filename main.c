@@ -11,6 +11,7 @@
 
 typedef enum builtin_cmd {usrcmd = 0, cd, ex, echo, pwd, type} shCmd;
 
+/* Reads user command from the standard input. */ 
 void get_command(char *cmd_str, int maxlen) {
   int ch = 0;
   int len = 0;
@@ -21,6 +22,25 @@ void get_command(char *cmd_str, int maxlen) {
   cmd_str[len] = '\0';
 }
 
+int run_command(char *cmd_path, char **cmd_args) {
+  int status = 0;
+  int ret;
+
+  pid_t wpid;
+  pid_t pid = fork();
+  if (pid == 0) {
+    if ((ret =execvp(cmd_path, cmd_args)) == -1)
+      return -1;
+    exit(ret);
+  } else {
+    do {
+      wpid = waitpid(pid, &status, WUNTRACED);
+    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+  }
+  return 0;
+}
+
+/* Fills token with one character. */ 
 void fill_token(char* token, char ch, int *token_idx, bool *token_in) {
   if (!*token_in)
     *token_in = true;
@@ -50,7 +70,8 @@ int tokenize(char *input_str, char **args, int maxlen) {
   for (int input_idx = 0; input_idx < maxlen; input_idx++) {
     char ch = input_str[input_idx];
     if (ch == '\0') {
-      add_token(temp, args, &token_num, &token_len);
+      if (token_len > 0)
+        add_token(temp, args, &token_num, &token_len);
       break;
     }
     switch (ch) {
@@ -139,6 +160,7 @@ int tokenize(char *input_str, char **args, int maxlen) {
   return token_num;
 }
 
+/* Control condition for evaluating user command */ 
 shCmd eval_command(char *cmd) {
   if (!strcmp(cmd, "type")) {
     return type;
@@ -155,6 +177,7 @@ shCmd eval_command(char *cmd) {
   }
 }
 
+/* Parses the pathnames in the PATH environment variable. */
 int parse_path(char *path, char *cmd, char *cmd_path) {
   int cmd_found = 0;
   char full_cmd_path[PATHLEN];
@@ -180,7 +203,7 @@ int parse_path(char *path, char *cmd, char *cmd_path) {
 int main() {
   char user_input[INPUTLEN];          // User input buffer
   char cmd_path[PATHLEN] = " ";       // User command path
-  char env_path[PATHLEN];
+  char env_path[PATHLEN];             // PATH environment variable
   char curr_path[PATHLEN];            // Current working directory
   char home_path[PATHLEN];            // User's home path
   char *args[ARGNUM];                 // Number of arguments in the command
@@ -192,7 +215,7 @@ int main() {
   while(1) {
     // Prompt message
     printf("$ ");
-    fflush(stdout);
+    //fflush(stdout);
 
     // Wait for user input
     get_command(user_input, INPUTLEN);
@@ -204,8 +227,11 @@ int main() {
     // Shell logic
     switch (cmd) {
       case type: {
+          if (args[1] == NULL) {
+            break;
+          }
           shCmd cmd_name = eval_command(args[1]);
-          strcpy(env_path,getenv("PATH"));    // Environment path
+          strcpy(env_path, getenv("PATH"));    // Environment path
           if (cmd_name > usrcmd) {
             printf("%s is a shell builtin\n", args[1]);
           } else {
@@ -248,30 +274,19 @@ int main() {
         break;
       case usrcmd:
         strcpy(env_path, getenv("PATH"));
-        if (args[0][0] == '.' && args[0][1] == '/') {
-          if ((access(args[0], F_OK)) == 0) {
-            pid_t pid = fork();
-            if (pid == 0) {
-              int ret = execvp(args[0], args);
-              exit(ret);
-            }
-            int status = 0;
-            while ((pid = wait(&status)) > 0);
-            break;
-          }
-        }
-
         if ((parse_path(env_path, args[0], cmd_path)) != -1) {
-          pid_t pid = fork();
-          if (pid == 0) {
-            int ret = execvp(cmd_path, args);
-            exit(ret);
-          } 
-          int status = 0;
-          while ((pid = wait(&status)) > 0);
+          int ret = run_command(args[0], args);
+          if (ret == -1)
+            printf("%s: not found\n", args[0]);
+          break;
+        } else if (access(args[0], F_OK) == 0) {
+          int ret = run_command(args[0], args);
+          if (ret == -1)
+            printf("%s: not found\n", args[0]);
           break;
         } else {
-          printf("%s: not found\n", user_input);
+          printf("%s: not found\n", args[0]);
+          break;
         }
         break;
     }
